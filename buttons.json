@@ -1,0 +1,18 @@
+{
+    "button_1": {
+      "label": "Ping Google",
+      "command": "ping google.com",
+      "use_wsl": true
+
+    },
+    "button_2": {
+      "label": "Echo",
+      "command": "echo Hello World",
+      "use_wsl": true
+
+    },
+    "button_3": {
+      "label": "Get Date",
+      "command": "date"
+    }
+  }  

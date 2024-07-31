@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Command Execution with Queues</title>
+    <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
+    <style>
+        .tab {
+            display: none; 
+        }
+        .tab.active {
+            display: block; 
+        }
+        textarea {
+            width: 100%;
+            height: 200px;
+            resize: both; 
+            font-family: monospace;
+            margin-top: 0px; /* Reduced space between text area and tab labels */
+        }
+
+        .queue-container {
+            height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin-top: 20px; /* Additional spacing from the tabs */
+        }
+        .job {
+            padding: 5px;
+            border: 1px solid #ddd;
+            margin-bottom: 5px;
+        }
+        .active-tab-button {
+            background-color: #007bff; /* Bootstrap primary color */
+            color: white;
+            border-color: #007bff;
+        }
+    </style>
+</head>
+<body class="container mt-3">
+    <!-- Other content, tabs, and buttons above this -->
+    <div class="row">
+        <div class="col-md-12">
+            <h1>CmdHub</h1>
+            <div id="button-container" class="button-container mb-2"></div>
+            <div id="view-button-container" class="button-container mb-0"></div>
+            <div id="tabs"></div>
+        </div>
+    </div>
+
+    <!-- New row for the Job Queue to place it at the bottom of the page -->
+    <div class="row">
+        <div class="col-md-12">
+            <h2>Job Queue</h2>
+            <div id="queue-container" class="queue-container"></div>
+        </div>
+    </div>
+
+
+    
+    <script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
+    <script>
+        var queues = {}; // Stores queues for each button
+
+        function runCommand(command, tabId) {
+            if (!queues[tabId]) {
+                queues[tabId] = [];
+            }
+            var queue = queues[tabId];
+            queue.push(command); // Add to queue
+
+            function processQueue() {
+                if (queue.length === 0) return; // If no jobs, do nothing
+
+                var currentCommand = queue[0]; // Get the first job in the queue
+                var outputTextarea = document.getElementById('textarea-' + tabId);
+                var currentDateTime = new Date().toLocaleString();
+                outputTextarea.value += '[' + currentDateTime + ']> ' + currentCommand + '\n';
+
+                fetch('/run_command', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ command: currentCommand })
+                })
+                .then(response => response.body)
+                .then(rb => {
+                    const reader = rb.getReader();
+                    return new ReadableStream({
+                        start(controller) {
+                            function pump() {
+                                return reader.read().then(({ done, value }) => {
+                                    if (done) {
+                                        controller.close();
+                                        outputTextarea.value += '\n----\n'; // Separator after the output
+                                        queue.shift(); // Remove the completed job
+                                        processQueue(); // Process the next job
+                                        updateQueueDisplay(); // Update the UI
+                                        return;
+                                    }
+                                    outputTextarea.value += new TextDecoder().decode(value);
+                                    outputTextarea.scrollTop = outputTextarea.scrollHeight;
+                                    return pump();
+                                });
+                            }
+                            return pump();
+                        }
+                    });
+                });
+            }
+
+            if (queue.length === 1) { // If this is the only job, start processing
+                processQueue();
+            }
+            updateQueueDisplay();
+        }
+
+        function openTab(tabId) {
+            var tabs = document.getElementsByClassName("tab");
+            for (let tab of tabs) {
+                tab.style.display = "none";
+                tab.classList.remove('active');
+            }
+            document.getElementById(tabId).classList.add('active');
+            document.getElementById(tabId).style.display = "block";
+        }
+
+        
+        function updateQueueDisplay() {
+            const queueContainer = document.getElementById('queue-container');
+            queueContainer.innerHTML = ''; // Clear existing display
+            Object.keys(queues).forEach(tabId => {
+                if (queues[tabId].length > 0) {
+                    const jobDisplay = document.createElement('div');
+                    jobDisplay.className = 'job';
+                    jobDisplay.textContent = 'Tab ' + tabId + ' - ' + queues[tabId].length + ' jobs';
+                    queueContainer.appendChild(jobDisplay);
+                }
+            });
+        }
+
+        window.onload = function() {
+            const buttons = {{ buttons|tojson }};
+            const buttonContainer = document.getElementById('button-container');
+            const viewButtonContainer = document.getElementById('view-button-container');
+            const tabsContainer = document.getElementById('tabs');
+
+            for (const key in buttons) {
+                if (buttons.hasOwnProperty(key)) {
+                    const buttonInfo = buttons[key];
+                    const tabId = `tab-${key}`;
+
+                    const execButton = document.createElement('button');
+                    execButton.className = 'btn btn-primary me-2';
+                    execButton.innerText = buttonInfo.label;
+                    execButton.onclick = () => {
+                        openTab(tabId);
+                        runCommand(buttonInfo.command, tabId);
+                    };
+                    buttonContainer.appendChild(execButton);
+
+                    const viewButton = document.createElement('button');
+                    viewButton.className = 'btn btn-secondary';
+                    viewButton.innerText = buttonInfo.label + ' Output';
+                    viewButton.onclick = () => {
+                        openTab(tabId);
+                    };
+                    viewButtonContainer.appendChild(viewButton);
+
+                    const tabContent = document.createElement('div');
+                    tabContent.id = tabId;
+                    tabContent.className = 'tab';
+                    const textarea = document.createElement('textarea');
+                    textarea.className = 'form-control';
+                    textarea.id = `textarea-${tabId}`;
+                    textarea.readOnly = true;
+                    textarea.rows = "50";
+                    tabContent.appendChild(textarea);
+                    tabsContainer.appendChild(tabContent);
+                }
+            }
+            // Open the first tab initially if there are buttons
+            if (Object.keys(buttons).length > 0) {
+                openTab(`tab-${Object.keys(buttons)[0]}`);
+            }
+        };
+    </script>
+</body>
+</html>
